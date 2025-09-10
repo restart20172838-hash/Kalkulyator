@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Kabel Kalkulyator — Ətraflı Nəticə</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#f6f7fb;margin:0;padding:14px;color:#0f172a;}
+  .container{max-width:1100px;margin:0 auto;}
+  .card{background:#fff;padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(15,23,42,0.06);margin-bottom:14px;}
+  h1{font-size:1.25rem;margin:0 0 10px 0;}
+  label{display:block;font-size:0.88rem;color:#475569;margin-bottom:6px;}
+  input,select{width:100%;padding:8px;border-radius:8px;border:1px solid #e6eef6;box-sizing:border-box;font-size:0.95rem;}
+  .grid{display:grid;gap:10px;grid-template-columns:repeat(3,1fr);}
+  .grid-2{display:grid;gap:10px;grid-template-columns:repeat(2,1fr);}
+  button{background:#0f172a;color:#fff;padding:10px 12px;border-radius:8px;border:0;cursor:pointer;font-weight:700;}
+  .muted{color:#64748b;font-size:0.9rem;}
+  pre{background:#f1f5f9;padding:10px;border-radius:8px;overflow:auto;}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:0.95rem;}
+  th,td{padding:8px;border-bottom:1px solid #eef2f7;text-align:center;}
+  th{background:#0f172a;color:#fff;border-radius:6px;}
+  tr.selected{background:#16a34a;color:#fff;font-weight:700;}
+  tr.recommended{background:#f59e0b;color:#fff;font-weight:700;}
+  .right{text-align:right;}
+  @media(max-width:880px){ .grid{grid-template-columns:repeat(1,1fr);} .grid-2{grid-template-columns:repeat(1,1fr);} }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Kabel Kalkulyator — Ətraflı Nəticə</h1>
+
+  <div class="card">
+    <div class="muted">Giriş parametrləri daxil et və "Hesabla" bas.</div>
+    <div class="grid" style="margin-top:10px;">
+      <div>
+        <label>Güc P (kW)</label>
+        <input id="power" type="number" value="15" step="0.1" />
+      </div>
+      <div>
+        <label>Gərginlik (V)</label>
+        <select id="voltage"><option value="220">220</option><option value="380" selected>380</option></select>
+      </div>
+      <div>
+        <label>Faza</label>
+        <select id="phase"><option value="1">1</option><option value="3" selected>3</option></select>
+      </div>
+
+      <div>
+        <label>cosφ</label>
+        <input id="pf" type="number" value="0.95" step="0.01" />
+      </div>
+      <div>
+        <label>η (eff)</label>
+        <input id="eff" type="number" value="0.98" step="0.01" />
+      </div>
+      <div>
+        <label>Məsafə L (m)</label>
+        <input id="length" type="number" value="60" />
+      </div>
+
+      <div>
+        <label>Material</label>
+        <select id="material"><option value="Cu">Mis (Cu)</option><option value="Al">Al</option></select>
+      </div>
+      <div>
+        <label>İzolyasiya</label>
+        <select id="insul"><option value="XLPE">XLPE</option><option value="PVC">PVC</option></select>
+      </div>
+      <div>
+        <label>Temperatur (°C)</label>
+        <input id="amb" type="number" value="30" />
+      </div>
+
+      <div>
+        <label>Qoyuluş</label>
+        <select id="laying">
+          <option value="duct">Boru / Kanal</option>
+          <option value="tray">Tray</option>
+          <option value="air">Havada</option>
+          <option value="soil">Torpaq</option>
+        </select>
+      </div>
+      <div>
+        <label>Qruplaşdırma (ədəd)</label>
+        <input id="group" type="number" value="1" min="1" />
+      </div>
+      <div>
+        <label>ΔU limiti (%)</label>
+        <input id="dulim" type="number" value="3" step="0.1" />
+      </div>
+    </div>
+
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button onclick="runCalc()">Hesabla</button>
+      <button onclick="copyResult()">Nəticəni kopyala</button>
+      <button onclick="shareText()">WhatsApp ilə paylaş</button>
+    </div>
+  </div>
+
+  <div id="resultArea"></div>
+</div>
+
+<script>
+/* ======= DATA ======= */
+const SIZES = [1.5,2.5,4,6,10,16,25,35,50,70,95,120,150,185,240];
+const BASE_AMP = {1.5:18,2.5:24,4:32,6:40,10:55,16:75,25:100,35:125,50:160,70:200,95:250,120:300,150:350,185:400,240:450};
+const MAP_BREAKER = {1.5:10,2.5:16,4:20,6:32,10:40,16:63,25:80,35:100,50:125,70:160,95:200,120:250,150:315,185:350,240:400};
+const MAT = { Cu:{rho20:1.724e-8,alpha:0.00393,acFactor:1.05}, Al:{rho20:2.826e-8,alpha:0.00403,acFactor:1.06} };
+
+/* ======= FACTORS ======= */
+function C_temp(amb, ins){
+  const t = Number(amb);
+  if(ins === 'XLPE'){
+    if(t <= 30) return 1;
+    if(t <= 40) return 0.95;
+    if(t <= 50) return 0.9;
+    return 0.85;
+  } else {
+    if(t <= 30) return 1;
+    if(t <= 40) return 0.9;
+    if(t <= 50) return 0.8;
+    return 0.75;
+  }
+}
+function C_laying(lay){ return {duct:1.0,tray:0.95,air:0.97,soil:0.9}[lay] || 1.0; }
+function C_group(n){
+  if(n <= 1) return 1;
+  if(n == 2) return 0.9;
+  if(n == 3) return 0.85;
+  if(n <= 6) return 0.8;
+  return 0.7;
+}
+
+/* ======= ELECTRICAL HELPERS ======= */
+function R_per_km(material, S, amb){
+  const m = MAT[material];
+  const rhoT = m.rho20 * (1 + m.alpha * (amb - 20));
+  const Rm = rhoT / (S * 1e-6); // ohm per meter
+  return Rm * m.acFactor * 1000; // ohm per km
+}
+function X_per_km(S){ return 0.08; }
+
+function voltageDropPct(I, U, phase, Rkm, Xkm, L, cosphi){
+  const sinphi = Math.sqrt(Math.max(0,1 - cosphi*cosphi));
+  const R = Rkm * (L / 1000);
+  const X = Xkm * (L / 1000);
+  const dU = (phase == 1) ? (2 * I * (R * cosphi + X * sinphi)) : (Math.sqrt(3) * I * (R * cosphi + X * sinphi));
+  return (dU / U) * 100;
+}
+
+/* ======= RENDER RESULTS ======= */
+function runCalc(){
+  // read inputs
+  const P = Number(document.getElementById('power').value) || 0;
+  const U = Number(document.getElementById('voltage').value) || 380;
+  const phase = Number(document.getElementById('phase').value) || 3;
+  const cosphi = Number(document.getElementById('pf').value) || 0.95;
+  const eff = Number(document.getElementById('eff').value) || 1;
+  const L = Number(document.getElementById('length').value) || 1;
+  const material = document.getElementById('material').value;
+  const insul = document.getElementById('insul').value;
+  const amb = Number(document.getElementById('amb').value) || 30;
+  const laying = document.getElementById('laying').value;
+  const group = Number(document.getElementById('group').value) || 1;
+  const dulim = Number(document.getElementById('dulim').value) || 3;
+
+  // Ib calculation step-by-step
+  const sqrt3 = Math.sqrt(3);
+  const numerator = P * 1000;
+  const denom1 = (phase == 1) ? (U * cosphi * eff) : (sqrt3 * U * cosphi * eff);
+  const Ib = denom1 > 0 ? numerator / denom1 : 0;
+
+  const Ct = C_laying(laying), Ca = C_temp(amb, insul), Cg = C_group(group);
+
+  // compute table lines with corrected Iz and ΔU
+  const lines = SIZES.map(S => {
+    const baseAmp = (BASE_AMP[S] || 0) * (material === 'Al' ? 0.8 : 1);
+    const Iz = baseAmp * Ct * Ca * Cg;
+    const Rkm = R_per_km(material, S, amb);
+    const Xkm = X_per_km(S);
+    const dU = voltageDropPct(Ib, U, phase, Rkm, Xkm, L, cosphi);
+    const breaker = MAP_BREAKER[S] || '';
+    return {S, Iz, dU, breaker};
+  });
+
+  // choose first that meets Iz>=Ib and dU<=limit
+  let chosen = lines.find(r => r.Iz >= Ib && r.dU <= dulim) || lines.find(r => r.Iz >= Ib) || lines[lines.length-1];
+
+  // recommended = next size (1 pill up)
+  const idx = SIZES.indexOf(chosen.S);
+  const nextIdx = Math.min(idx + 1, SIZES.length - 1);
+  const recommendedS = SIZES[nextIdx];
+  const recBase = BASE_AMP[recommendedS] || 0;
+  const recIz = recBase * Ct * Ca * Cg;
+  const recBreaker = MAP_BREAKER[recommendedS] || '';
+
+  // Build detailed HTML
+  const res = [];
+
+  // Input summary
+  res.push(`<div class="card"><h2>Giriş parametrlər</h2>
+    <div class="muted">Bu dəyərlərlə hesablandı</div>
+    <table><tr><th>Parametr</th><th>Qiymət</th></tr>
+    <tr><td>P (kW)</td><td>${P}</td></tr>
+    <tr><td>U (V)</td><td>${U}</td></tr>
+    <tr><td>Faza</td><td>${phase}</td></tr>
+    <tr><td>cosφ</td><td>${cosphi}</td></tr>
+    <tr><td>η (eff)</td><td>${eff}</td></tr>
+    <tr><td>Məsafə L (m)</td><td>${L}</td></tr>
+    <tr><td>Material</td><td>${material}</td></tr>
+    <tr><td>İzolyasiya</td><td>${insul}</td></tr>
+    <tr><td>Temperatur °C</td><td>${amb}</td></tr>
+    <tr><td>Qoyuluş</td><td>${laying}</td></tr>
+    <tr><td>Qruplaşdırma</td><td>${group}</td></tr>
+    <tr><td>ΔU limiti (%)</td><td>${dulim}</td></tr>
+    </table></div>`);
+
+  // Ib steps
+  const denomText = (phase==1) ? `${U} × ${cosphi} × ${eff} = ${(U*cosphi*eff).toFixed(6)}` : `${sqrt3.toFixed(6)} × ${U} × ${cosphi} × ${eff} = ${(sqrt3*U*cosphi*eff).toFixed(6)}`;
+  res.push(`<div class="card"><h2>1) İşləyən cərəyan I_b — addım-addım</h2>
+    <pre>Formul:
+I_b = P·1000 / (${phase==1 ? 'U·cosφ·η' : '√3·U·cosφ·η'})
+
+Hesab:
+P·1000 = ${numerator}
+Denominator = ${denomText}
+I_b = ${numerator} / ${(phase==1 ? (U*cosphi*eff).toFixed(6) : (sqrt3*U*cosphi*eff).toFixed(6))} = ${Ib.toFixed(6)} A
+
+Nəticə: I_b ≈ ${Ib.toFixed(2)} A</pre></div>`);
+
+  // Full table of sizes with Iz, dU and checks
+  let tableHtml = `<div class="card"><h2>2) Bütün ölçülər üçün Iz, ΔU və uyğunluq</h2>
+    <div class="muted">Sətirlər: S (mm²) — I_z (A) — ΔU (%) — Avtomat (A) — Iz ≥ I_b ? — ΔU ≤ lim ?</div>
+    <table><thead><tr><th>S (mm²)</th><th>I_z (A)</th><th>ΔU (%)</th><th>Avtomat (A)</th><th>Iz ≥ I_b?</th><th>ΔU ≤ ${dulim}%?</th></tr></thead><tbody>`;
+
+  lines.forEach(r=>{
+    const okIz = r.Iz >= Ib;
+    const okDu = r.dU <= dulim;
+    tableHtml += `<tr${r.S===chosen.S ? ' class="selected"' : (r.S===recommendedS ? ' class="recommended"' : '')}>
+      <td>${r.S}</td>
+      <td>${r.Iz.toFixed(1)}</td>
+      <td>${r.dU.toFixed(3)}</td>
+      <td>${r.breaker}</td>
+      <td>${okIz ? 'Bəli' : 'Xeyr'}</td>
+      <td>${okDu ? 'Bəli' : 'Xeyr'}</td>
+    </tr>`;
+  });
+
+  tableHtml += `</tbody></table>
+    <div class="muted" style="margin-top:8px">Yaşıl — seçilmiş kabel; Sarı — təhlükəsizlik üzrə tövsiyə olunan (1 pillə yuxarı).</div></div>`;
+
+  res.push(tableHtml);
+
+  // Chosen & Recommended detailed
+  res.push(`<div class="card"><h2>3) Seçilmiş kabel və tövsiyə olunan (1 pillə yuxarı)</h2>
+    <table><tr><th>Element</th><th>Qiymət</th></tr>
+    <tr><td>Hesablanan uyğun kabel</td><td><strong>${chosen.S} mm²</strong></td></tr>
+    <tr><td>Hesablanan I_z</td><td>${chosen.Iz.toFixed(1)} A</td></tr>
+    <tr><td>Hesablanan ΔU</td><td>${chosen.dU.toFixed(3)} %</td></tr>
+    <tr><td>Uyğun avtomat (cədvəl)</td><td>${chosen.breaker} A</td></tr>
+
+    <tr><td style="height:10px"></td><td></td></tr>
+
+    <tr><td>Təhlükəsizlik üzrə 1 pillə yuxarı kabel</td><td><strong>${recommendedS} mm²</strong></td></tr>
+    <tr><td>Tövsiyə edilən I_z</td><td>${recIz.toFixed(1)} A</td></tr>
+    <tr><td>Tövsiyə edilən avtomat</td><td>${recBreaker} A</td></tr>
+    </table>
+
+    <div class="muted" style="margin-top:8px">Qeyd: "1 pillə yuxarı" seçimi SIZES sıra sırasına görə götürülür (məsələn 6 → 10 mm²). Əgər seçilmiş S ən böyükdürsə, o zaman özünün özü tövsiyə edilir.</div>
+  </div>`);
+
+  // Short summary block
+  res.push(`<div class="card"><h2>Qısa xülasə</h2>
+    <pre>I_b ≈ ${Ib.toFixed(2)} A
+Seçilmiş kabel: ${chosen.S} mm²  — I_z ${chosen.Iz.toFixed(1)} A  — ΔU ${chosen.dU.toFixed(3)} %
+Tövsiyə olunan (1 pillə yuxarı): ${recommendedS} mm² — I_z ${recIz.toFixed(1)} A — Avtomat ${recBreaker} A
+</pre></div>`);
+
+  // Put into page
+  document.getElementById('resultArea').innerHTML = res.join('');
+}
+
+/* ======= UTILITY ======= */
+function copyResult(){
+  const area = document.getElementById('resultArea');
+  if(!area) return alert('Nəticə hazır deyil.');
+  const text = area.innerText || area.textContent || '';
+  navigator.clipboard.writeText(text).then(()=>{ alert('Nəticə kopyalandı — indi yapışdır (paste) edə bilərsiniz.'); }, ()=>{ alert('Kopyalama mümkün olmadı.'); });
+}
+function shareText(){
+  const area = document.getElementById('resultArea');
+  const text = area ? (area.innerText || area.textContent || '') : '';
+  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
+}
+
+/* ======= init ======= */
+window.addEventListener('load', ()=>{ runCalc(); });
+</script>
+</body>
+</html>
